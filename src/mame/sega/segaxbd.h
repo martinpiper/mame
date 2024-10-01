@@ -58,6 +58,11 @@ public:
 	uint16_t smgp_excs_r(offs_t offset);
 	void smgp_excs_w(offs_t offset, uint16_t data, uint16_t mem_mask = ~0);
 
+	required_device<palette_device>& getPalette()
+	{
+		return m_palette;
+	}
+
 protected:
 	// main CPU read/write handlers
 	uint8_t analog_r();

@@ -9,6 +9,7 @@
 #include "emu.h"
 #include "sega16sp.h"
 #include "segaic16.h"
+#include "segaxbd.h"
 
 
 
@@ -1051,6 +1052,10 @@ sega_xboard_sprite_device::sega_xboard_sprite_device(const machine_config &mconf
 //  draw -- render the sprites within the cliprect
 //-------------------------------------------------
 
+static std::set<uint64_t> alreadySaved;
+static FILE* fp = 0;
+static int savedRows = 0;
+
 void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
 	//
@@ -1091,6 +1096,15 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 
 	set_origin(m_xoffs, m_yoffs);
 
+//	(*((segaxbd_state*)&(*((segaxbd_fd1094_state*)(*((device_t*)&(*((sprite_device<unsigned short, bitmap_ind16>*) & (*((sega_16bit_sprite_device*)this)))))).m_owner)))).m_paletteram
+	segaxbd_fd1094_state* theDevice = (segaxbd_fd1094_state*)owner();
+	segaxbd_state* theState = (segaxbd_state*)theDevice;
+	required_device<palette_device>& thePalette = theState->getPalette();
+	palette_device* theActualPalette = thePalette.lookup();
+//	rgb_t rgb = theActualPalette->pen_color(0);
+
+
+
 	// render the sprites in order
 	const uint32_t *spritebase = &m_sprite_region_ptr[0];
 	uint8_t numbanks = m_sprite_region_ptr.bytes() / 0x40000;
@@ -1115,6 +1129,7 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 		int hzoom   = data[4] & 0x7ff;
 		int height  = (m_is_xboard ? (data[5] & 0xfff) : (data[5] >> 8)) + 1;
 		int colpri  = ((m_is_xboard ? (data[6] & 0xff) : (data[5] & 0x7f)) << 4) | (((data[3] >> 12) & 7) << 12);
+		int justPalette = ((m_is_xboard ? (data[6] & 0xff) : (data[5] & 0x7f)) << 4);
 
 		// adjust X coordinate
 		// note: the threshhold below is a guess. If it is too high, rachero will draw garbage
@@ -1133,6 +1148,116 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 		if (numbanks)
 			bank %= numbanks;
 		const uint32_t *spritedata = spritebase + 0x10000 * bank;
+
+		// Calculate a value to check for the sprite being written with the address and palette
+		uint64_t savedIndex = (uint64_t)(0x10000 * bank) + addr;
+		savedIndex = (savedIndex << 16) | justPalette;
+		// Incorporate the palette entry colours, so if the palette is changed in RAM then this has a chance of saving a new image
+		// This handles the "Thunder Blade" logo palette being updated after it is displayed for a frame at game boot.
+		for (int i = 0; i < 16; i++)
+		{
+			savedIndex = (savedIndex << 1) | (savedIndex >> 63);
+			savedIndex ^= theActualPalette->pen_color(justPalette + i);
+			savedIndex = savedIndex << 1;
+		}
+
+		const int transparent = 0xff00ff;
+
+		if (alreadySaved.insert(savedIndex).second)
+		{
+			// When it inserts, then the sprite has not been written before, so write the sprite now
+			if (!fp)
+			{
+				// To convert this to images, use imagemagick like this: convert.exe -verbose -size "512x256" -depth 8 rgb:c:\temp\t.raw "C:\temp\thunderblade arcade\t.png"
+				fp = fopen("c:\\temp\\t.raw", "wb");
+			}
+
+			uint16_t workingRowAddr = addr;
+			int rowsWritten = 0;
+			int calcHeight = (height * vzoom) >> 9;
+			while (rowsWritten < calcHeight)
+			{
+				uint16_t workingAddr = workingRowAddr;
+				int width = 0;
+				while (width < 512)
+				{
+					uint32_t pixels = spritedata[workingAddr];
+					if (flip)
+					{
+						workingAddr--;
+					}
+					else
+					{
+						pixels =
+							((pixels << 28) & 0xf0000000) |
+							((pixels << 20) & 0x0f000000) |
+							((pixels << 12) & 0x00f00000) |
+							((pixels << 4) & 0x000f0000) |
+							((pixels >> 4) & 0x0000f000) |
+							((pixels >> 12) & 0x00000f00) |
+							((pixels >> 20) & 0x000000f0) |
+							((pixels >> 28) & 0x0000000f);
+						workingAddr++;
+					}
+
+					bool last_data = (pixels & 0x0f00'0000) == 0x0f00'0000;
+
+					for (int k = 0; k < 8; k++)
+					{
+						int pix = pixels & 0xf;
+						int paletteEntry = justPalette | pix;
+
+						if (pix != 0 && pix != 15)
+						{
+							rgb_t rgb = theActualPalette->pen_color(paletteEntry);
+							uint8_t component;
+							component = rgb.r();
+							fwrite(&component, 1, 1, fp);
+							component = rgb.g();
+							fwrite(&component, 1, 1, fp);
+							component = rgb.b();
+							fwrite(&component, 1, 1, fp);
+						}
+						else
+						{
+							fwrite(&transparent, 1, 3, fp);
+						}
+
+						pixels >>= 4;
+
+						width++;
+					}
+
+					if (last_data)
+						break;
+				}
+				// Any remainder for this row
+				while (width < 512)
+				{
+					fwrite(&transparent, 1, 3, fp);
+					width++;
+				}
+				rowsWritten++;
+				savedRows++;
+
+				workingRowAddr += pitch;
+			}
+
+			// Fill any other space...
+			while (savedRows & 0xff)
+			{
+				int width = 0;
+				while (width < 512)
+				{
+					fwrite(&transparent, 1, 3, fp);
+					width++;
+				}
+				savedRows++;
+			}
+
+			fflush(fp);
+		}
+
 
 		// clamp to a maximum of 8x (not 100% confirmed)
 		if (vzoom < 0x40) vzoom = 0x40;
