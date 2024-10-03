@@ -31,6 +31,11 @@ public:
 	void hangon_paletteram_w(offs_t offset, uint16_t data, uint16_t mem_mask = ~0);
 	void philko_paletteram_w(offs_t offset, uint16_t data, uint16_t mem_mask = ~0);
 
+	required_device<palette_device>& getPalette()
+	{
+		return m_palette;
+	}
+
 protected:
 	// construction/destruction
 	sega_16bit_common_base(const machine_config &mconfig, device_type type, const char *tag);

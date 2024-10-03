@@ -10,6 +10,7 @@
 #include "sega16sp.h"
 #include "segaic16.h"
 #include "segaxbd.h"
+#include "segaorun.h"
 
 
 
@@ -1097,12 +1098,22 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 	set_origin(m_xoffs, m_yoffs);
 
 //	(*((segaxbd_state*)&(*((segaxbd_fd1094_state*)(*((device_t*)&(*((sprite_device<unsigned short, bitmap_ind16>*) & (*((sega_16bit_sprite_device*)this)))))).m_owner)))).m_paletteram
-	segaxbd_fd1094_state* theDevice = (segaxbd_fd1094_state*)owner();
-	segaxbd_state* theState = (segaxbd_state*)theDevice;
-	required_device<palette_device>& thePalette = theState->getPalette();
-	palette_device* theActualPalette = thePalette.lookup();
-//	rgb_t rgb = theActualPalette->pen_color(0);
-
+	device_t* theDevice = owner();
+	palette_device* theActualPalette = 0;
+	bool isOutrun = false;
+	if (dynamic_cast<segaxbd_state*>(theDevice) != 0)
+	{
+		segaxbd_state* theState = dynamic_cast<segaxbd_state*>(theDevice);
+		required_device<palette_device>& thePalette = theState->getPalette();
+		theActualPalette = thePalette.lookup();
+	}
+	else if ( dynamic_cast<segaorun_state*>(theDevice))
+	{
+		segaorun_state* theState = dynamic_cast<segaorun_state*>(theDevice);
+		required_device<palette_device>& thePalette = theState->getPalette();
+		theActualPalette = thePalette.lookup();
+		isOutrun = true;
+	}
 
 
 	// render the sprites in order
@@ -1130,6 +1141,12 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 		int height  = (m_is_xboard ? (data[5] & 0xfff) : (data[5] >> 8)) + 1;
 		int colpri  = ((m_is_xboard ? (data[6] & 0xff) : (data[5] & 0x7f)) << 4) | (((data[3] >> 12) & 7) << 12);
 		int justPalette = ((m_is_xboard ? (data[6] & 0xff) : (data[5] & 0x7f)) << 4);
+		if (isOutrun)
+		{
+			// For outrun need to add in the palette offset:
+			// src\mame\sega\segaorun_v.cpp : dest[x] = 0x800 | (pix & 0x7ff);
+			justPalette = 0x800 | (justPalette & 0x7ff);
+		}
 
 		// adjust X coordinate
 		// note: the threshhold below is a guess. If it is too high, rachero will draw garbage
@@ -1157,13 +1174,16 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 		for (int i = 0; i < 16; i++)
 		{
 			savedIndex = (savedIndex << 1) | (savedIndex >> 63);
-			savedIndex ^= theActualPalette->pen_color(justPalette + i);
+			if (theActualPalette)
+			{
+				savedIndex ^= theActualPalette->pen_color(justPalette + i);
+			}
 			savedIndex = savedIndex << 1;
 		}
 
 		const int transparent = 0xff00ff;
 
-		if (alreadySaved.insert(savedIndex).second)
+		if (theActualPalette && alreadySaved.insert(savedIndex).second)
 		{
 			// When it inserts, then the sprite has not been written before, so write the sprite now
 			if (!fp)
