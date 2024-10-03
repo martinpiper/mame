@@ -298,16 +298,24 @@ int supracan_state::get_tilemap_region(int layer)
 	switch(layer)
 	{
 		case 0:
+		{
 			static const int layer0_mode[8] = { 2, 1, 0, 1, 0, 0, 0, 0 };
 			return layer0_mode[m_gfx_mode & 7];
+		}
 		case 1:
+		{
 			static const int layer1_mode[8] = { 2, 1, 1, 1, 2, 2, 2, 2 };
 			return layer1_mode[m_gfx_mode & 7];
+		}
 		case 2:
+		{
 			return 2;
+		}
 		case 3:
+		{
 			static const int s_roz_mode_lut[4] = { 4, 2, 1, 0 };
 			return s_roz_mode_lut[m_roz_mode & 3];
+		}
 	}
 
 	// TODO: 4th layer at $f00160 (gfx mode 0 only, ignored for everything else)
