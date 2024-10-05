@@ -68,6 +68,7 @@ void multipcm_device::init_sample(sample_t &sample, uint32_t index)
 void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 {
 //	const address_space_config *memConfig = memory_space_config().front().second;
+//	double theTime = m_stream->sample_time().as_double();
 	m_stream->update();
 	slot.m_regs[reg] = data;
 
