@@ -65,8 +65,83 @@ void multipcm_device::init_sample(sample_t &sample, uint32_t index)
 	sample.m_lfo_amplitude_reg = read_byte(address + 11) & 0xf;
 }
 
+class PotentialSample
+{
+public:
+	PotentialSample(u32 start, u32 end, u32 loopStart, u32 loopEnd) : mStart(start), mEnd(end), mLoopStart(loopStart), mLoopEnd(loopEnd) {}
+	virtual ~PotentialSample() {}
+
+	u32 mStart;
+	u32 mEnd;
+	u32 mLoopStart;
+	u32 mLoopEnd;
+
+	friend bool operator<(const PotentialSample& lhs, const PotentialSample& rhs)
+	{
+		return std::tie(lhs.mStart, lhs.mEnd, lhs.mLoopStart, lhs.mLoopEnd) < std::tie(rhs.mStart, rhs.mEnd, rhs.mLoopStart, rhs.mLoopEnd);
+	}
+};
+
+class SoundEvent
+{
+public:
+	SoundEvent() {}
+	virtual ~SoundEvent() {}
+};
+
+class SoundEventNoteOn : public SoundEvent
+{
+public:
+	SoundEventNoteOn(int sampleIndex, int octave, int pitch) : mSampleIndex(sampleIndex), mOctave(octave), mPitch(pitch) {}
+	virtual ~SoundEventNoteOn() {}
+
+	int mSampleIndex;
+	int mOctave;
+	int mPitch;
+};
+
+class SoundEventNoteOff : public SoundEvent
+{
+public:
+	SoundEventNoteOff() {}
+	virtual ~SoundEventNoteOff() {}
+};
+
+class SoundEventNoteRelease : public SoundEvent
+{
+public:
+	SoundEventNoteRelease() {}
+	virtual ~SoundEventNoteRelease() {}
+};
+
+// Why static and not inside the multipcm_device class? Well this attempts to merge all instances of multipcm_device into one output
+static int sInstanceChannelOffset = 0;
+static std::vector<u8> sSamples;
+static std::vector<bool> sSamplesUsed;
+static bool sWriteData = true;
+std::map< PotentialSample, int> sPotentialSampleToIndex;
+static std::vector<bool> sAnyNotesinChannel;
+static std::vector< std::vector< SoundEvent* > > sMusicRows;
+
 void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 {
+	if (!mInstanceInit)
+	{
+		mInstanceInit = true;
+
+		const address_space_config* memConfig = memory_space_config().front().second;
+		mSampleAddressOffset = sSamples.size();
+		mChannelOffset = sInstanceChannelOffset;
+		sInstanceChannelOffset += 32;
+		sAnyNotesinChannel.resize(sInstanceChannelOffset);
+		int currentRange = 1 << memConfig->addr_width();
+
+		for (int i = 0; i < currentRange; i++)
+		{
+			sSamples.push_back(read_byte(i));
+			sSamplesUsed.push_back(false);
+		}
+	}
 //	const address_space_config *memConfig = memory_space_config().front().second;
 //	double theTime = m_stream->sample_time().as_double();
 	m_stream->update();
@@ -82,6 +157,17 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 		{
 			// according to YMF278 sample write causes some base params written to the regs (envelope+lfos)
 			init_sample(slot.m_sample, slot.m_regs[1] | ((slot.m_regs[2] & 1) << 8));
+
+			// Flag the samples as being used
+			for (u32 i = mSampleAddressOffset + slot.m_sample.m_start; i < (mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end); i++)
+			{
+				sSamplesUsed[i] = true;
+			}
+
+			PotentialSample potentialSample(mSampleAddressOffset + slot.m_sample.m_start, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_loop, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end);
+			auto retInsert = sPotentialSampleToIndex.insert(std::pair< PotentialSample , int>(potentialSample, (int)sPotentialSampleToIndex.size()));
+			slot.mXMSampleIndex = retInsert.first->second;
+
 			write_slot(slot, 6, slot.m_sample.m_lfo_vibrato_reg);
 			write_slot(slot, 7, slot.m_sample.m_lfo_amplitude_reg);
 
@@ -100,10 +186,30 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 			}
 			break;
 		case 4: // KeyOn/Off
+		{
+			double theTime = m_stream->sample_time().as_double();
+			int theRowIndex = (int)(theTime * 50);
+
+			sMusicRows.resize(theRowIndex + 1);
+			std::vector< SoundEvent* >& theRow = sMusicRows[theRowIndex];
+			theRow.resize(sInstanceChannelOffset);	// Ensures we have enough channels
+			// m_cur_slot
+
 			if (data & 0x80) // KeyOn
 			{
 				slot.m_playing = true;
 				retrigger_sample(slot);
+
+				SoundEventNoteOn* event = new SoundEventNoteOn(slot.mXMSampleIndex , slot.m_octave , slot.m_pitch);
+				if (m_cur_slot >= 0)
+				{
+					int theChannel = mChannelOffset + m_cur_slot;
+					if (theChannel < theRow.size())
+					{
+						theRow[theChannel] = event;
+						sAnyNotesinChannel[theChannel] = true;
+					}
+				}
 			}
 			else
 			{
@@ -112,13 +218,37 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 					if (slot.m_sample.m_release_reg != 0xf)
 					{
 						slot.m_envelope_gen.m_state = state_t::RELEASE;
+
+						SoundEventNoteRelease* event = new SoundEventNoteRelease();
+						if (m_cur_slot >= 0)
+						{
+							int theChannel = mChannelOffset + m_cur_slot;
+							if (theChannel < theRow.size())
+							{
+								theRow[theChannel] = event;
+								sAnyNotesinChannel[theChannel] = true;
+							}
+						}
+
 					}
 					else
 					{
 						slot.m_playing = false;
+
+						SoundEventNoteOff* event = new SoundEventNoteOff();
+						if (m_cur_slot >= 0)
+						{
+							int theChannel = mChannelOffset + m_cur_slot;
+							if (theChannel < theRow.size())
+							{
+								theRow[theChannel] = event;
+								sAnyNotesinChannel[theChannel] = true;
+							}
+						}
 					}
 				}
 			}
+		}
 			break;
 		case 5: // TL + Interpolation
 			slot.m_dest_total_level = (data >> 1) & 0x7f;
@@ -182,6 +312,52 @@ DEFINE_DEVICE_TYPE(MULTIPCM, multipcm_device, "ymw258f", "Yamaha YMW-258-F")
 multipcm_device::multipcm_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
 	gew_pcm_device(mconfig, MULTIPCM, tag, owner, clock, 28, 224),
 	m_cur_slot(0),
-	m_address(0)
+	m_address(0),
+	mInstanceInit(false)
 {
+}
+
+multipcm_device::~multipcm_device()
+{
+	if (sSamples.empty())
+	{
+		return;
+	}
+	if (!sWriteData)
+	{
+		return;
+	}
+
+	sWriteData = false;
+
+	int totalUsedSamples = 0;
+
+	bool sLastState = false;
+	for (size_t i = 0; i < sSamplesUsed.size(); i++)
+	{
+		if (sLastState != sSamplesUsed[i])
+		{
+			if (sSamplesUsed[i])
+			{
+				printf("Start sample: $%x\n", (int)i);
+			}
+			else
+			{
+				printf("End sample: $%x\n", (int)i);
+			}
+			sLastState = sSamplesUsed[i];
+		}
+		if (sSamplesUsed[i])
+		{
+			totalUsedSamples ++;
+		}
+	}
+
+	printf("totalUsedSamples $%x (%d)\n", totalUsedSamples, totalUsedSamples);
+	printf("used rows $%x (%d)\n", (int)sMusicRows.size(), (int)sMusicRows.size());
+	for (size_t i = 0; i < sAnyNotesinChannel.size(); i++)
+	{
+		printf("channel %d : %d\n", (int)i, (int)sAnyNotesinChannel[i]);
+	}
+
 }

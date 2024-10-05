@@ -101,6 +101,8 @@ protected:
 		uint8_t m_vibrato = 0;
 		lfo_t m_amplitude_lfo; // AM lfo
 		uint8_t m_tremolo = 0;
+
+		int mXMSampleIndex = 0;
 	};
 
 	uint32_t value_to_fixed(const uint32_t bits, const float value);

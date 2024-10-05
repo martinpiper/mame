@@ -11,6 +11,7 @@ class multipcm_device : public gew_pcm_device
 {
 public:
 	multipcm_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
+	virtual ~multipcm_device();
 
 	void write(offs_t offset, uint8_t data);
 	uint8_t read();
@@ -25,6 +26,10 @@ private:
 	void init_sample(sample_t &sample, uint32_t index);
 
 	void write_slot(slot_t &slot, int32_t reg, uint8_t data);
+
+	bool mInstanceInit;
+	int mChannelOffset;
+	size_t mSampleAddressOffset;
 };
 
 DECLARE_DEVICE_TYPE(MULTIPCM, multipcm_device)
