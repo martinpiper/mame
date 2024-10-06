@@ -82,11 +82,27 @@ public:
 	}
 };
 
+static FILE* sFP = 0;
+static void writeByte(u8 byteValue)
+{
+	fwrite(&byteValue, 1, 1, sFP);
+
+}
+static void writeWord(u16 wordValue)
+{
+	fwrite(&wordValue, 1, 2, sFP);
+}
+static void writeLong(u32 longValue)
+{
+	fwrite(&longValue, 1, 4, sFP);
+}
+
 class SoundEvent
 {
 public:
 	SoundEvent() {}
 	virtual ~SoundEvent() {}
+	virtual void Write(void) = 0;
 };
 
 class SoundEventNoteOn : public SoundEvent
@@ -94,6 +110,15 @@ class SoundEventNoteOn : public SoundEvent
 public:
 	SoundEventNoteOn(int sampleIndex, int octave, int pitch) : mSampleIndex(sampleIndex), mOctave(octave), mPitch(pitch) {}
 	virtual ~SoundEventNoteOn() {}
+
+	virtual void Write(void)
+	{
+		writeByte(0x87);	// Note, instrument, volume
+		// TODO: writeByte((mOctave* 12) + mPitch);	// Note
+		writeByte(32);	// Note
+		writeByte(mSampleIndex);	// Sample/instrument
+		writeByte(64);	// Volume
+	}
 
 	int mSampleIndex;
 	int mOctave;
@@ -105,6 +130,11 @@ class SoundEventNoteOff : public SoundEvent
 public:
 	SoundEventNoteOff() {}
 	virtual ~SoundEventNoteOff() {}
+
+	virtual void Write(void)
+	{
+		writeByte(0x80);	// Empty for now...
+	}
 };
 
 class SoundEventNoteRelease : public SoundEvent
@@ -112,6 +142,11 @@ class SoundEventNoteRelease : public SoundEvent
 public:
 	SoundEventNoteRelease() {}
 	virtual ~SoundEventNoteRelease() {}
+
+	virtual void Write(void)
+	{
+		writeByte(0x80);	// Empty for now...
+	}
 };
 
 // Why static and not inside the multipcm_device class? Well this attempts to merge all instances of multipcm_device into one output
@@ -360,4 +395,166 @@ multipcm_device::~multipcm_device()
 		printf("channel %d : %d\n", (int)i, (int)sAnyNotesinChannel[i]);
 	}
 
+
+	sFP = fopen("c:\\temp\\t.xm", "wb");
+
+	fwrite("Extended Module:     ", 1, 17, sFP);
+	fwrite("Some name which is a certain length", 1, 20, sFP);
+	writeByte(0x1a);
+	fwrite("FastTracker v2.00    ", 1, 20, sFP);
+	writeWord(0x104);
+	writeLong(0x114);
+
+	// Song length
+	writeWord(255);
+	// Restart position
+	writeWord(0x00);
+	// Number of channels
+	writeWord(64);
+	// Number of patterns
+	writeWord(255);
+	// Number of instruments
+	writeWord(sPotentialSampleToIndex.size());
+	// Flags
+	writeWord(0x01);	// Specifies a **linear** frequency table
+	// Tempo
+	//writeWord(0x05);
+	writeWord(1);
+	// BPM
+	//writeWord(0x98);
+	writeWord(50 * 60);
+	// Pattern order table
+	for (int i = 0; i < 255; i++)
+	{
+		writeByte(i);
+	}
+	writeByte(0);
+
+	auto rowIterator = sMusicRows.begin();
+	for (int pattern = 0; pattern < 255; pattern++)
+	{
+		// Pattern header length
+		writeLong(0x09);
+		// Packing type
+		writeByte(0x00);
+		// Number of rows
+		//writeWord(0x100);
+		writeWord(255);
+		// Number of bytes for pattern data
+		int sizePos = ftell(sFP);
+		writeWord(256 * 64);	// Which is going to be wrong at this stage
+		int startPos = ftell(sFP);
+		for (int row = 0; row < 255; row++)
+		{
+			if (rowIterator != sMusicRows.end())
+			{
+				auto theRow = *rowIterator;
+				rowIterator++;
+
+				for (int channel = 0; channel < 64; channel++)
+				{
+					if (channel < theRow.size())
+					{
+						SoundEvent* soundEvent = theRow[channel];
+						if (soundEvent != 0)
+						{
+							soundEvent->Write();
+						}
+						else
+						{
+							writeByte(0x80);	// Empty
+						}
+					}
+					else
+					{
+						writeByte(0x80);	// Empty
+					}
+				}
+			}
+			else
+			{
+				for (int channel = 0; channel < 64; channel++)
+				{
+					writeByte(0x80);	// Empty
+				}
+			}
+		}
+		int endPos = ftell(sFP);
+		// Write the real size of the pattern
+		fseek(sFP, sizePos, SEEK_SET);
+		writeWord(endPos - startPos);
+		fseek(sFP, endPos, SEEK_SET);
+	}
+
+	// Now instruments, in order of their sample index, not the map order
+	for (int desiredSampleIndex = 0; desiredSampleIndex < (int)sPotentialSampleToIndex.size(); desiredSampleIndex++)
+	{
+		bool wroteOne = false;
+		auto sampleIterator = sPotentialSampleToIndex.begin();
+		while (sampleIterator != sPotentialSampleToIndex.end())
+		{
+			if (sampleIterator->second == desiredSampleIndex)
+			{
+				writeLong(0x107);
+				fwrite("Instrument\0            ", 1, 22, sFP);
+				writeByte(0); // Type
+				writeWord(1); // One sample for this instrument
+				// And sample
+				writeLong(0x28);	// Size
+				// Keymap, volume envelope, panning envelope
+				for (int i = 0; i < 96 + 48 + 48; i++)
+				{
+					writeByte(0);
+				}
+				// Envelope points...
+				for (int i = 0; i < 14; i++)
+				{
+					writeByte(0);
+				}
+				// Volume fadeout
+				writeWord(1);
+				// Reserved
+				for (int i = 0; i < 22; i++)
+				{
+					writeByte(0);
+				}
+				// Sample header
+				// Sample length
+				writeLong(sampleIterator->first.mEnd - sampleIterator->first.mStart);
+				// Sample loop start
+				//writeLong(sampleIterator->first.mLoopStart - sampleIterator->first.mStart);
+				writeLong(0);
+				// Sample loop length
+				//writeLong(sampleIterator->first.mLoopEnd - sampleIterator->first.mLoopStart);
+				writeLong(0);
+				// Volume
+				writeByte(0x40);
+				// Finetune
+				writeByte(0);
+				// Type, looping...
+				//writeByte(0x01);
+				writeByte(0x00);
+				// Panning
+				writeByte(0x80);
+				// Relative note number
+				writeByte(0x00);
+				// Packing type
+				writeByte(0x00);
+				fwrite("Sample name\0           ", 1, 22, sFP);
+				int oldSample = 0;
+				for (u32 i = sampleIterator->first.mStart; i < sampleIterator->first.mEnd; i++)
+				{
+					s8 sampleByte = (s8)sSamples[i];
+					writeByte(sampleByte - oldSample);
+					oldSample = sampleByte;
+				}
+				wroteOne = true;
+				break;
+			}
+		}
+		assert(wroteOne);
+	}
+
+
+	fclose(sFP);
 }
