@@ -43,7 +43,7 @@ u8 gew_pcm_device::getSampleFromAddress(u32 address)
 	{
 		return 0;
 	}
-	return sSamples[address];
+	return sSamples.at(address);
 }
 
 void gew_pcm_device::retrigger_sample(slot_t &slot)
@@ -69,6 +69,7 @@ void gew_pcm_device::retrigger_sample(slot_t &slot)
 
 		const address_space_config* memConfig = memory_space_config().front().second;
 		int currentRange = 1 << memConfig->addr_width();
+		sSamples.reserve(sSamples.size() + currentRange);
 		for (u32 i = 0; i < currentRange; i++)
 		{
 			u8 theSample = read_byte((uint32_t)i);

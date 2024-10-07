@@ -108,7 +108,7 @@ public:
 class SoundEventNoteOn : public SoundEvent
 {
 public:
-	SoundEventNoteOn(int sampleIndex, double theNote) : mSampleIndex(sampleIndex), mTheNote(theNote) {}
+	SoundEventNoteOn(int sampleIndex, double theNote, int volume) : mSampleIndex(sampleIndex) , mTheNote(theNote) , mVolume(volume) {}
 	virtual ~SoundEventNoteOn() {}
 
 	virtual void Write(void)
@@ -121,10 +121,13 @@ public:
 		//writeByte(77);	// Note E-6
 //		double midiNote = 12.0f * log(double(mStep) * 440.0f);
 		double midiNote = 12.0f * log(mTheNote / 440.0f);
+//		double midiNote = 12.0f * log(1472.0f / mTheNote);
 //		int imidiNote = (int)(midiNote - 23);
 		// MIDI C-1 = 24
 		// Amiga C-1 = 1
 		int imidiNote = (int)(midiNote + 69 - 23 + 7);
+//		int imidiNote = (int)(midiNote + 61);
+//		int imidiNote = (int)(61 - midiNote);
 		writeByte(imidiNote);	// Note
 		writeByte(mSampleIndex+1);	// Sample/instrument
 		writeByte(64);	// Volume
@@ -133,6 +136,7 @@ public:
 	int mSampleIndex;
 //	uint32_t mStep;
 	double mTheNote;
+	int mVolume;
 };
 
 class SoundEventNoteOff : public SoundEvent
@@ -159,6 +163,21 @@ public:
 	}
 };
 
+class SoundEventNoteVolume : public SoundEvent
+{
+public:
+	SoundEventNoteVolume(int volume) : mVolume(volume) {}
+	virtual ~SoundEventNoteVolume() {}
+
+	virtual void Write(void)
+	{
+		writeByte(0x84);
+		writeByte(mVolume);
+	}
+
+	int mVolume;
+};
+
 // Why static and not inside the multipcm_device class? Well this attempts to merge all instances of multipcm_device into one output
 static int sInstanceChannelOffset = 0;
 static std::vector<bool> sSamplesUsed;
@@ -166,6 +185,7 @@ static bool sWriteData = true;
 std::map< PotentialSample, int> sPotentialSampleToIndex;
 static std::vector<bool> sAnyNotesinChannel;
 static std::vector< std::vector< SoundEvent* > > sMusicRows;
+double sFirstEventDelta = -1.0f;
 
 void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 {
@@ -221,6 +241,15 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 		case 4: // KeyOn/Off
 		{
 			double theTime = m_stream->sample_time().as_double();
+			if (data & 0x80) // Only do this on the first real KeyOn
+			{
+				if (sFirstEventDelta < 0.0f)
+				{
+					sFirstEventDelta = theTime;
+				}
+			}
+			// Make the first event appear at the start of the output file :)
+			theTime = theTime - sFirstEventDelta;
 //			int theRowIndex = (int)(theTime * 100.0f);	// 250 BPM
 			int theRowIndex = (int)(theTime * 50.0f);	// 125 BPM
 
@@ -249,7 +278,7 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 					int theChannel = mChannelOffset + m_cur_slot;
 					if (theChannel < theRow.size())
 					{
-						SoundEventNoteOn* event = new SoundEventNoteOn(slot.mXMSampleIndex, slot.m_pitchForStep);
+						SoundEventNoteOn* event = new SoundEventNoteOn(slot.mXMSampleIndex, (double)/*slot.m_step*/ slot.m_pitchForStep , (0x40 * (0x7f - slot.m_dest_total_level)) / 0x7f);
 						theRow[theChannel] = event;
 						sAnyNotesinChannel[theChannel] = true;
 					}
@@ -293,7 +322,7 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 				}
 			}
 		}
-			break;
+		break;
 		case 5: // TL + Interpolation
 			slot.m_dest_total_level = (data >> 1) & 0x7f;
 			if (!(data & 1)) // Interpolate TL
@@ -310,6 +339,25 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 			else
 			{
 				slot.m_total_level = slot.m_dest_total_level << TL_SHIFT;
+			}
+			if (m_cur_slot >= 0)
+			{
+				double theTime = m_stream->sample_time().as_double();
+
+				theTime = theTime - sFirstEventDelta;
+				//			int theRowIndex = (int)(theTime * 100.0f);	// 250 BPM
+				int theRowIndex = (int)(theTime * 50.0f);	// 125 BPM
+
+				sMusicRows.resize(theRowIndex + 1);
+				std::vector< SoundEvent* >& theRow = sMusicRows[theRowIndex];
+				theRow.resize(sInstanceChannelOffset);	// Ensures we have enough channels
+
+				int theChannel = mChannelOffset + m_cur_slot;
+				if (theChannel < theRow.size())
+				{
+					SoundEventNoteVolume* event = new SoundEventNoteVolume((0x40 * (0x7f - slot.m_dest_total_level)) / 0x7f);
+					theRow[theChannel] = event;
+				}
 			}
 			break;
 		case 6: // LFO frequency + Pitch LFO
