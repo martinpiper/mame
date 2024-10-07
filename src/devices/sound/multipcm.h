@@ -29,7 +29,6 @@ private:
 
 	bool mInstanceInit;
 	int mChannelOffset;
-	size_t mSampleAddressOffset;
 };
 
 DECLARE_DEVICE_TYPE(MULTIPCM, multipcm_device)

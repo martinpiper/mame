@@ -20,7 +20,12 @@ class gew_pcm_device : public device_t,
 public:
 	static constexpr feature_type imperfect_features() { return feature::SOUND; }
 
+	size_t mSampleAddressOffset = 0;
+
+	u8 getSampleFromAddress(u32 address);
+
 protected:
+	bool saveSamples = true;
 	gew_pcm_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock,
 		uint32_t voices, uint32_t clock_divider);
 
@@ -88,6 +93,7 @@ protected:
 		uint32_t m_offset = 0;
 		uint8_t m_octave = 0;
 		uint16_t m_pitch = 0;
+		double m_pitchForStep = 0;
 		uint32_t m_step = 0;
 		bool m_reverse = false;
 		uint32_t m_pan = 0;

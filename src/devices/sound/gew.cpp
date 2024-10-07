@@ -35,6 +35,17 @@ const double gew_pcm_device::BASE_TIMES[64] = {
 constexpr uint32_t gew_pcm_device::TL_SHIFT;
 constexpr uint32_t gew_pcm_device::EG_SHIFT;
 
+static std::vector<u8> sSamples;
+
+u8 gew_pcm_device::getSampleFromAddress(u32 address)
+{
+	if (address >= sSamples.size())
+	{
+		return 0;
+	}
+	return sSamples[address];
+}
+
 void gew_pcm_device::retrigger_sample(slot_t &slot)
 {
 	slot.m_offset = 0;
@@ -48,6 +59,22 @@ void gew_pcm_device::retrigger_sample(slot_t &slot)
 #if MULTIPCM_LOG_SAMPLES
 	dump_sample(slot);
 #endif
+
+	// It seems that the safe and reliable place to do read_byte() for all the sample data is at this point in the emulation, not inside multipcm_device::write_slot()
+	if (saveSamples)
+	{
+		saveSamples = false;
+
+		mSampleAddressOffset = sSamples.size();
+
+		const address_space_config* memConfig = memory_space_config().front().second;
+		int currentRange = 1 << memConfig->addr_width();
+		for (u32 i = 0; i < currentRange; i++)
+		{
+			u8 theSample = read_byte((uint32_t)i);
+			sSamples.push_back(theSample);
+		}
+	}
 }
 
 void  gew_pcm_device::update_step(slot_t &slot)
@@ -62,6 +89,7 @@ void  gew_pcm_device::update_step(slot_t &slot)
 	{
 		pitch <<= oct;
 	}
+	slot.m_pitchForStep = (double) pitch / (double) (1 << 16);
 	slot.m_step = pitch / m_rate;
 }
 

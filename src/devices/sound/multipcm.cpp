@@ -108,21 +108,31 @@ public:
 class SoundEventNoteOn : public SoundEvent
 {
 public:
-	SoundEventNoteOn(int sampleIndex, int octave, int pitch) : mSampleIndex(sampleIndex), mOctave(octave), mPitch(pitch) {}
+	SoundEventNoteOn(int sampleIndex, double theNote) : mSampleIndex(sampleIndex), mTheNote(theNote) {}
 	virtual ~SoundEventNoteOn() {}
 
 	virtual void Write(void)
 	{
 		writeByte(0x87);	// Note, instrument, volume
-		// TODO: writeByte((mOctave* 12) + mPitch);	// Note
-		writeByte(32);	// Note
-		writeByte(mSampleIndex);	// Sample/instrument
+		// "You're running third" plays at slot.m_step = 1472 , however in the XM file it needs to be note C-5 = 61
+		// "Time lap" should be E-6, note 77, slot.m_step = 4096
+		// writeByte((mPitch * 60) / 448);	// Note
+		//writeByte(61);	// Note C-5
+		//writeByte(77);	// Note E-6
+//		double midiNote = 12.0f * log(double(mStep) * 440.0f);
+		double midiNote = 12.0f * log(mTheNote / 440.0f);
+//		int imidiNote = (int)(midiNote - 23);
+		// MIDI C-1 = 24
+		// Amiga C-1 = 1
+		int imidiNote = (int)(midiNote + 69 - 23 + 7);
+		writeByte(imidiNote);	// Note
+		writeByte(mSampleIndex+1);	// Sample/instrument
 		writeByte(64);	// Volume
 	}
 
 	int mSampleIndex;
-	int mOctave;
-	int mPitch;
+//	uint32_t mStep;
+	double mTheNote;
 };
 
 class SoundEventNoteOff : public SoundEvent
@@ -151,7 +161,6 @@ public:
 
 // Why static and not inside the multipcm_device class? Well this attempts to merge all instances of multipcm_device into one output
 static int sInstanceChannelOffset = 0;
-static std::vector<u8> sSamples;
 static std::vector<bool> sSamplesUsed;
 static bool sWriteData = true;
 std::map< PotentialSample, int> sPotentialSampleToIndex;
@@ -165,17 +174,16 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 		mInstanceInit = true;
 
 		const address_space_config* memConfig = memory_space_config().front().second;
-		mSampleAddressOffset = sSamples.size();
+
 		mChannelOffset = sInstanceChannelOffset;
 		sInstanceChannelOffset += 32;
 		sAnyNotesinChannel.resize(sInstanceChannelOffset);
 		int currentRange = 1 << memConfig->addr_width();
 
-		for (int i = 0; i < currentRange; i++)
-		{
-			sSamples.push_back(read_byte(i));
-			sSamplesUsed.push_back(false);
-		}
+		sSamplesUsed.resize(sSamplesUsed.size() + currentRange);
+
+		size_t endSize = sSamplesUsed.size();
+		printf("Instance: $%x\n", (int)endSize);
 	}
 //	const address_space_config *memConfig = memory_space_config().front().second;
 //	double theTime = m_stream->sample_time().as_double();
@@ -192,16 +200,6 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 		{
 			// according to YMF278 sample write causes some base params written to the regs (envelope+lfos)
 			init_sample(slot.m_sample, slot.m_regs[1] | ((slot.m_regs[2] & 1) << 8));
-
-			// Flag the samples as being used
-			for (u32 i = mSampleAddressOffset + slot.m_sample.m_start; i < (mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end); i++)
-			{
-				sSamplesUsed[i] = true;
-			}
-
-			PotentialSample potentialSample(mSampleAddressOffset + slot.m_sample.m_start, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_loop, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end);
-			auto retInsert = sPotentialSampleToIndex.insert(std::pair< PotentialSample , int>(potentialSample, (int)sPotentialSampleToIndex.size()));
-			slot.mXMSampleIndex = retInsert.first->second;
 
 			write_slot(slot, 6, slot.m_sample.m_lfo_vibrato_reg);
 			write_slot(slot, 7, slot.m_sample.m_lfo_amplitude_reg);
@@ -223,7 +221,8 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 		case 4: // KeyOn/Off
 		{
 			double theTime = m_stream->sample_time().as_double();
-			int theRowIndex = (int)(theTime * 50);
+//			int theRowIndex = (int)(theTime * 100.0f);	// 250 BPM
+			int theRowIndex = (int)(theTime * 50.0f);	// 125 BPM
 
 			sMusicRows.resize(theRowIndex + 1);
 			std::vector< SoundEvent* >& theRow = sMusicRows[theRowIndex];
@@ -235,12 +234,22 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 				slot.m_playing = true;
 				retrigger_sample(slot);
 
-				SoundEventNoteOn* event = new SoundEventNoteOn(slot.mXMSampleIndex , slot.m_octave , slot.m_pitch);
 				if (m_cur_slot >= 0)
 				{
+
+					// Flag the samples as being used
+					for (u32 i = mSampleAddressOffset + slot.m_sample.m_start; i < (mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end); i++)
+					{
+						sSamplesUsed[i] = true;
+					}
+					PotentialSample potentialSample(mSampleAddressOffset + slot.m_sample.m_start, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_loop, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end);
+					auto retInsert = sPotentialSampleToIndex.insert(std::pair< PotentialSample, int>(potentialSample, (int)sPotentialSampleToIndex.size()));
+					slot.mXMSampleIndex = retInsert.first->second;
+
 					int theChannel = mChannelOffset + m_cur_slot;
 					if (theChannel < theRow.size())
 					{
+						SoundEventNoteOn* event = new SoundEventNoteOn(slot.mXMSampleIndex, slot.m_pitchForStep);
 						theRow[theChannel] = event;
 						sAnyNotesinChannel[theChannel] = true;
 					}
@@ -354,7 +363,7 @@ multipcm_device::multipcm_device(const machine_config &mconfig, const char *tag,
 
 multipcm_device::~multipcm_device()
 {
-	if (sSamples.empty())
+	if (sSamplesUsed.empty())
 	{
 		return;
 	}
@@ -395,6 +404,23 @@ multipcm_device::~multipcm_device()
 		printf("channel %d : %d\n", (int)i, (int)sAnyNotesinChannel[i]);
 	}
 
+	FILE* fp = fopen("c:\\temp\\SamplesAll.bin", "wb");
+	for (u32 i = 0; i < sSamplesUsed.size(); i++)
+	{
+		s8 sampleByte = (s8)getSampleFromAddress(i);
+		fputc(sampleByte, fp);
+	}
+	fclose(fp);
+	fp = fopen("c:\\temp\\SamplesUsed.bin", "wb");
+	for (u32 i = 0; i < sSamplesUsed.size(); i++)
+	{
+		if (sSamplesUsed[i])
+		{
+			s8 sampleByte = (s8)getSampleFromAddress(i);
+			fputc(sampleByte , fp);
+		}
+	}
+	fclose(fp);
 
 	sFP = fopen("c:\\temp\\t.xm", "wb");
 
@@ -406,13 +432,13 @@ multipcm_device::~multipcm_device()
 	writeLong(0x114);
 
 	// Song length
-	writeWord(255);
+	writeWord(256);
 	// Restart position
 	writeWord(0x00);
 	// Number of channels
-	writeWord(64);
+	writeWord(32);
 	// Number of patterns
-	writeWord(255);
+	writeWord(256);
 	// Number of instruments
 	writeWord(sPotentialSampleToIndex.size());
 	// Flags
@@ -421,59 +447,68 @@ multipcm_device::~multipcm_device()
 	//writeWord(0x05);
 	writeWord(1);
 	// BPM
-	//writeWord(0x98);
-	writeWord(50 * 60);
+	// Daytona (adv) = 49 seconds from the start to the start of the final "ahhhhhhhh"...
+//	writeWord(250);	// Works with * 100.0f
+	writeWord(125);	// Works with * 50.0f
+	//writeWord(50 * 60);
 	// Pattern order table
-	for (int i = 0; i < 255; i++)
+	for (int i = 0; i < 256; i++)
 	{
 		writeByte(i);
 	}
-	writeByte(0);
 
 	auto rowIterator = sMusicRows.begin();
-	for (int pattern = 0; pattern < 255; pattern++)
+	for (int pattern = 0; pattern < 256; pattern++)
 	{
 		// Pattern header length
 		writeLong(0x09);
 		// Packing type
 		writeByte(0x00);
 		// Number of rows
-		//writeWord(0x100);
-		writeWord(255);
+		writeWord(256);
 		// Number of bytes for pattern data
 		int sizePos = ftell(sFP);
 		writeWord(256 * 64);	// Which is going to be wrong at this stage
 		int startPos = ftell(sFP);
-		for (int row = 0; row < 255; row++)
+		for (int row = 0; row < 256; row++)
 		{
 			if (rowIterator != sMusicRows.end())
 			{
 				auto theRow = *rowIterator;
 				rowIterator++;
 
-				for (int channel = 0; channel < 64; channel++)
+				for (int channel = 0; channel < 32; channel++)
 				{
+					SoundEvent* soundEvent = 0;
+
 					if (channel < theRow.size())
 					{
-						SoundEvent* soundEvent = theRow[channel];
-						if (soundEvent != 0)
+						soundEvent = theRow[channel];
+					}
+
+					// Try to merge the other 32 channels from the emulation into the first 32 XM channels
+					if (!soundEvent)
+					{
+						if ((channel+32) < theRow.size())
 						{
-							soundEvent->Write();
+							soundEvent = theRow[channel+32];
 						}
-						else
-						{
-							writeByte(0x80);	// Empty
-						}
+					}
+					
+					if (soundEvent)
+					{
+						soundEvent->Write();
 					}
 					else
 					{
 						writeByte(0x80);	// Empty
 					}
+
 				}
 			}
 			else
 			{
-				for (int channel = 0; channel < 64; channel++)
+				for (int channel = 0; channel < 32; channel++)
 				{
 					writeByte(0x80);	// Empty
 				}
@@ -522,18 +557,15 @@ multipcm_device::~multipcm_device()
 				// Sample length
 				writeLong(sampleIterator->first.mEnd - sampleIterator->first.mStart);
 				// Sample loop start
-				//writeLong(sampleIterator->first.mLoopStart - sampleIterator->first.mStart);
-				writeLong(0);
+				writeLong(sampleIterator->first.mLoopStart - sampleIterator->first.mStart);
 				// Sample loop length
-				//writeLong(sampleIterator->first.mLoopEnd - sampleIterator->first.mLoopStart);
-				writeLong(0);
+				writeLong(sampleIterator->first.mLoopEnd - sampleIterator->first.mLoopStart);
 				// Volume
 				writeByte(0x40);
 				// Finetune
 				writeByte(0);
 				// Type, looping...
-				//writeByte(0x01);
-				writeByte(0x00);
+				writeByte(0x01);
 				// Panning
 				writeByte(0x80);
 				// Relative note number
@@ -544,13 +576,14 @@ multipcm_device::~multipcm_device()
 				int oldSample = 0;
 				for (u32 i = sampleIterator->first.mStart; i < sampleIterator->first.mEnd; i++)
 				{
-					s8 sampleByte = (s8)sSamples[i];
+					s8 sampleByte = (s8)getSampleFromAddress(i);
 					writeByte(sampleByte - oldSample);
 					oldSample = sampleByte;
 				}
 				wroteOne = true;
 				break;
 			}
+			sampleIterator++;
 		}
 		assert(wroteOne);
 	}
