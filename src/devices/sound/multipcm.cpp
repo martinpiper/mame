@@ -120,6 +120,14 @@ public:
 		{
 			writeByte(mVolume);
 		}
+		if (mByte & 0x08)
+		{
+			writeByte(mEffect);
+		}
+		if (mByte & 0x10)
+		{
+			writeByte(mEffectParameter);
+		}
 	}
 
 	SoundEvent& SetNote(double theNote)
@@ -159,10 +167,22 @@ public:
 		return *this;
 	}
 
+	SoundEvent& SetPan(int pan)
+	{
+		mByte |= 0x18;
+
+		mEffect = 0x08;
+		mEffectParameter = 8 + (pan << 4);
+
+		return *this;
+	}
+
 	u8 mByte = 0x80;
 	u8 mNote = 0;
 	u8 mInstrument = 0;
 	u8 mVolume = 0;
+	u8 mEffect = 0;
+	u8 mEffectParameter = 0;
 };
 
 class SoundEventNoteOff : public SoundEvent
@@ -307,6 +327,7 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 							theRow[theChannel] = event;
 						}
 						event->SetSampleIndex(slot.mXMSampleIndex).SetNote(slot.m_pitchForStep).SetVolume(slot.m_dest_total_level);
+						event->SetPan(slot.m_pan);
 						sAnyNotesinChannel[theChannel] = true;
 					}
 				}
