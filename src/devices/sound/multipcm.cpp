@@ -120,14 +120,16 @@ public:
 		//writeByte(61);	// Note C-5
 		//writeByte(77);	// Note E-6
 //		double midiNote = 12.0f * log(double(mStep) * 440.0f);
-		double midiNote = 12.0f * log(mTheNote / 440.0f);
+//		double midiNote = 12.0f * log(mTheNote / 440.0f);
 //		double midiNote = 12.0f * log(1472.0f / mTheNote);
+		double midiNote = 12.0f * log(mTheNote / 8287.0f);
 //		int imidiNote = (int)(midiNote - 23);
 		// MIDI C-1 = 24
 		// Amiga C-1 = 1
-		int imidiNote = (int)(midiNote + 69 - 23 + 7);
+//		int imidiNote = (int)(midiNote + 69 - 23 + 7);
 //		int imidiNote = (int)(midiNote + 61);
 //		int imidiNote = (int)(61 - midiNote);
+		int imidiNote = (int)(midiNote + 54);
 		writeByte(imidiNote);	// Note
 		writeByte(mSampleIndex+1);	// Sample/instrument
 		writeByte(64);	// Volume

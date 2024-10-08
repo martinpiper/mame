@@ -88,7 +88,9 @@ void  gew_pcm_device::update_step(slot_t &slot)
 	{
 		pitch <<= oct;
 	}
-	slot.m_pitchForStep = (double) pitch / (double) (1 << 16);
+	slot.m_pitchForStep = (double) pitch / (double) (1 << TL_SHIFT);
+	slot.m_pitchForStep = slot.m_pitchForStep / m_rate;
+	slot.m_pitchForStep = slot.m_pitchForStep * 44100.0f;
 	slot.m_step = pitch / m_rate;
 }
 
