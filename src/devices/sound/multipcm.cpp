@@ -97,6 +97,8 @@ static void writeLong(u32 longValue)
 	fwrite(&longValue, 1, 4, sFP);
 }
 
+// TODO: It would be better to accumulate changes, note, instrument, volume, into one event.
+// This would handle volume being changed in the cycles just after starting a note, and also pitch changes.
 class SoundEvent
 {
 public:
@@ -119,18 +121,10 @@ public:
 		// writeByte((mPitch * 60) / 448);	// Note
 		//writeByte(61);	// Note C-5
 		//writeByte(77);	// Note E-6
-//		double midiNote = 12.0f * log(double(mStep) * 440.0f);
 		double midiNote = 12.0f * log2(mTheNote / 440.0f);
-//		double midiNote = 12.0f * log(1472.0f / mTheNote);
-//		double midiNote = 12.0f * log(mTheNote / 8287.0f);
-//		int imidiNote = (int)(midiNote - 23);
 		// MIDI C-1 = 24
 		// Amiga C-1 = 1
-//		int imidiNote = (int)(midiNote + 69 - 23 + 7);
-//		int imidiNote = (int)(midiNote + 61);
 		int imidiNote = (int)(midiNote - 1);
-//		int imidiNote = (int)(61 - midiNote);
-//		int imidiNote = (int)(midiNote + 54);
 		writeByte(imidiNote);	// Note
 		writeByte(mSampleIndex+1);	// Sample/instrument
 		writeByte(mVolume);	// Volume
