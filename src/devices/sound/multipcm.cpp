@@ -180,7 +180,6 @@ public:
 
 // Why static and not inside the multipcm_device class? Well this attempts to merge all instances of multipcm_device into one output
 static int sInstanceChannelOffset = 0;
-static std::vector<bool> sSamplesUsed;
 static bool sWriteData = true;
 std::map< PotentialSample, int> sPotentialSampleToIndex;
 static std::vector<bool> sAnyNotesinChannel;
@@ -193,17 +192,9 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 	{
 		mInstanceInit = true;
 
-		const address_space_config* memConfig = memory_space_config().front().second;
-
 		mChannelOffset = sInstanceChannelOffset;
 		sInstanceChannelOffset += 32;
 		sAnyNotesinChannel.resize(sInstanceChannelOffset);
-		int currentRange = 1 << memConfig->addr_width();
-
-		sSamplesUsed.resize(sSamplesUsed.size() + currentRange);
-
-		size_t endSize = sSamplesUsed.size();
-		printf("Instance: $%x\n", (int)endSize);
 	}
 //	const address_space_config *memConfig = memory_space_config().front().second;
 //	double theTime = m_stream->sample_time().as_double();
@@ -226,7 +217,9 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 
 			// retrigger if key is on
 			if (slot.m_playing)
+			{
 				retrigger_sample(slot);
+			}
 
 			break;
 		}
@@ -266,11 +259,6 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 				if (m_cur_slot >= 0)
 				{
 
-					// Flag the samples as being used
-					for (u32 i = mSampleAddressOffset + slot.m_sample.m_start; i < (mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end); i++)
-					{
-						sSamplesUsed[i] = true;
-					}
 					PotentialSample potentialSample(mSampleAddressOffset + slot.m_sample.m_start, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_loop, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end);
 					auto retInsert = sPotentialSampleToIndex.insert(std::pair< PotentialSample, int>(potentialSample, (int)sPotentialSampleToIndex.size()));
 					slot.mXMSampleIndex = retInsert.first->second;
@@ -340,7 +328,7 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 			{
 				slot.m_total_level = slot.m_dest_total_level << TL_SHIFT;
 			}
-			if (m_cur_slot >= 0)
+			if (m_cur_slot >= 0 && slot.m_playing)
 			{
 				double theTime = m_stream->sample_time().as_double();
 
@@ -411,7 +399,7 @@ multipcm_device::multipcm_device(const machine_config &mconfig, const char *tag,
 
 multipcm_device::~multipcm_device()
 {
-	if (sSamplesUsed.empty())
+	if (getSamplesSize() == 0)
 	{
 		return;
 	}
@@ -425,11 +413,11 @@ multipcm_device::~multipcm_device()
 	int totalUsedSamples = 0;
 
 	bool sLastState = false;
-	for (size_t i = 0; i < sSamplesUsed.size(); i++)
+	for (size_t i = 0; i < getSamplesSize(); i++)
 	{
-		if (sLastState != sSamplesUsed[i])
+		if (sLastState != getSampleUsedFromAddress(i))
 		{
-			if (sSamplesUsed[i])
+			if (getSampleUsedFromAddress(i))
 			{
 				printf("Start sample: $%x\n", (int)i);
 			}
@@ -437,9 +425,9 @@ multipcm_device::~multipcm_device()
 			{
 				printf("End sample: $%x\n", (int)i);
 			}
-			sLastState = sSamplesUsed[i];
+			sLastState = getSampleUsedFromAddress(i);
 		}
-		if (sSamplesUsed[i])
+		if (getSampleUsedFromAddress(i))
 		{
 			totalUsedSamples ++;
 		}
@@ -452,17 +440,10 @@ multipcm_device::~multipcm_device()
 		printf("channel %d : %d\n", (int)i, (int)sAnyNotesinChannel[i]);
 	}
 
-	FILE* fp = fopen("c:\\temp\\SamplesAll.bin", "wb");
-	for (u32 i = 0; i < sSamplesUsed.size(); i++)
+	FILE *fp = fopen("c:\\temp\\SamplesUsed.bin", "wb");
+	for (u32 i = 0; i < getSamplesSize(); i++)
 	{
-		s8 sampleByte = (s8)getSampleFromAddress(i);
-		fputc(sampleByte, fp);
-	}
-	fclose(fp);
-	fp = fopen("c:\\temp\\SamplesUsed.bin", "wb");
-	for (u32 i = 0; i < sSamplesUsed.size(); i++)
-	{
-		if (sSamplesUsed[i])
+		if (getSampleUsedFromAddress(i))
 		{
 			s8 sampleByte = (s8)getSampleFromAddress(i);
 			fputc(sampleByte , fp);

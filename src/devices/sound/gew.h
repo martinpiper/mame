@@ -23,6 +23,8 @@ public:
 	size_t mSampleAddressOffset = 0;
 
 	u8 getSampleFromAddress(u32 address);
+	bool getSampleUsedFromAddress(u32 address);
+	size_t getSamplesSize(void);
 
 protected:
 	bool saveSamples = true;

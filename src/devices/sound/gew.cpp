@@ -36,6 +36,8 @@ constexpr uint32_t gew_pcm_device::TL_SHIFT;
 constexpr uint32_t gew_pcm_device::EG_SHIFT;
 
 static std::vector<u8> sSamples;
+static std::vector<bool> sSamplesUsed;
+
 
 u8 gew_pcm_device::getSampleFromAddress(u32 address)
 {
@@ -43,7 +45,20 @@ u8 gew_pcm_device::getSampleFromAddress(u32 address)
 	{
 		return 0;
 	}
-	return sSamples.at(address);
+	return sSamples[address];
+}
+bool gew_pcm_device::getSampleUsedFromAddress(u32 address)
+{
+	if (address >= sSamples.size())
+	{
+		return 0;
+	}
+	return sSamplesUsed[address];
+}
+
+size_t gew_pcm_device::getSamplesSize(void)
+{
+	return sSamplesUsed.size();
 }
 
 void gew_pcm_device::retrigger_sample(slot_t &slot)
@@ -59,23 +74,6 @@ void gew_pcm_device::retrigger_sample(slot_t &slot)
 #if MULTIPCM_LOG_SAMPLES
 	dump_sample(slot);
 #endif
-
-	// It seems that the safe and reliable place to do read_byte() for all the sample data is at this point in the emulation, not inside multipcm_device::write_slot()
-	if (saveSamples)
-	{
-		saveSamples = false;
-
-		mSampleAddressOffset = sSamples.size();
-
-		const address_space_config* memConfig = memory_space_config().front().second;
-		int currentRange = 1 << memConfig->addr_width();
-		sSamples.reserve(sSamples.size() + currentRange);
-		for (u32 i = 0; i < currentRange; i++)
-		{
-			u8 theSample = read_byte((uint32_t)i);
-			sSamples.push_back(theSample);
-		}
-	}
 }
 
 void  gew_pcm_device::update_step(slot_t &slot)
@@ -369,6 +367,19 @@ gew_pcm_device::gew_pcm_device(const machine_config &mconfig, device_type type, 
 
 void gew_pcm_device::device_start()
 {
+	// It seems that the safe and reliable place to do read_byte() for all the sample data is at this point in the emulation, not inside multipcm_device::write_slot()
+	if (saveSamples)
+	{
+		saveSamples = false;
+
+		mSampleAddressOffset = sSamples.size();
+
+		const address_space_config* memConfig = memory_space_config().front().second;
+		int currentRange = 1 << memConfig->addr_width();
+		sSamples.resize(sSamples.size() + currentRange, 0);
+		sSamplesUsed.resize(sSamplesUsed.size() + currentRange, false);
+	}
+
 	m_rate = (float)clock() / m_clock_divider;
 
 	m_stream = stream_alloc(0, 2, m_rate);
@@ -611,6 +622,16 @@ void gew_pcm_device::sound_stream_update(sound_stream &stream, std::vector<read_
 				else
 				{
 					csample = (int16_t)(read_byte(slot.m_sample.m_start + spos) << 8);
+				}
+
+				if (!sSamplesUsed[mSampleAddressOffset + slot.m_sample.m_start])
+				{
+					for (u32 i = 0; i < slot.m_sample.m_end; i++)
+					{
+						u8 theSample = read_byte(slot.m_sample.m_start + i);
+						sSamples[mSampleAddressOffset + slot.m_sample.m_start + i] = theSample;
+						sSamplesUsed[mSampleAddressOffset + slot.m_sample.m_start + i] = true;
+					}
 				}
 
 				int32_t sample = (csample * fpart + slot.m_prev_sample * ((1 << TL_SHIFT) - fpart)) >> TL_SHIFT;
