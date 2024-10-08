@@ -104,76 +104,88 @@ class SoundEvent
 public:
 	SoundEvent() {}
 	virtual ~SoundEvent() {}
-	virtual void Write(void) = 0;
-};
-
-class SoundEventNoteOn : public SoundEvent
-{
-public:
-	SoundEventNoteOn(int sampleIndex, double theNote, int volume) : mSampleIndex(sampleIndex) , mTheNote(theNote) , mVolume(volume) {}
-	virtual ~SoundEventNoteOn() {}
 
 	virtual void Write(void)
 	{
-		writeByte(0x87);	// Note, instrument, volume
-		// "You're running third" plays at slot.m_step = 1472 , however in the XM file it needs to be note C-5 = 61
-		// "Time lap" should be E-6, note 77, slot.m_step = 4096
-		// writeByte((mPitch * 60) / 448);	// Note
-		//writeByte(61);	// Note C-5
-		//writeByte(77);	// Note E-6
-		double midiNote = 12.0f * log2(mTheNote / 440.0f);
-		// MIDI C-1 = 24
-		// Amiga C-1 = 1
-		int imidiNote = (int)(midiNote - 1);
-		writeByte(imidiNote);	// Note
-		writeByte(mSampleIndex+1);	// Sample/instrument
-		writeByte(mVolume);	// Volume
+		writeByte(mByte);
+		if (mByte & 0x01)
+		{
+			writeByte(mNote);
+		}
+		if (mByte & 0x02)
+		{
+			writeByte(mInstrument);
+		}
+		if (mByte & 0x04)
+		{
+			writeByte(mVolume);
+		}
 	}
 
-	int mSampleIndex;
-//	uint32_t mStep;
-	double mTheNote;
-	int mVolume;
+	SoundEvent& SetNote(double theNote)
+	{
+		mByte |= 0x01;
+
+		double midiNote = 12.0f * log2(theNote / 440.0f);
+		int imidiNote = (int)(midiNote - 1);
+		if (imidiNote < 0)
+		{
+			imidiNote = 0;
+		}
+		if (imidiNote > 96)
+		{
+			imidiNote = 96;
+		}
+		mNote = (u8)imidiNote;
+
+		return *this;
+	}
+
+	SoundEvent& SetSampleIndex(int sampleIndex)
+	{
+		mByte |= 0x02;
+
+		mInstrument = (u8) (sampleIndex + 1);
+
+		return *this;
+	}
+
+	SoundEvent& SetVolume(int volume)
+	{
+		mByte |= 0x04;
+
+		mVolume = (u8)((0x40 * (0x7f - volume)) / 0x7f);
+
+		return *this;
+	}
+
+	u8 mByte = 0x80;
+	u8 mNote = 0;
+	u8 mInstrument = 0;
+	u8 mVolume = 0;
 };
 
 class SoundEventNoteOff : public SoundEvent
 {
 public:
-	SoundEventNoteOff() {}
-	virtual ~SoundEventNoteOff() {}
-
-	virtual void Write(void)
+	SoundEventNoteOff()
 	{
-		writeByte(0x80);	// Empty for now...
+		SetVolume(0);
 	}
+	virtual ~SoundEventNoteOff() {}
 };
 
 class SoundEventNoteRelease : public SoundEvent
 {
 public:
-	SoundEventNoteRelease() {}
+	SoundEventNoteRelease()
+	{
+		mNote = 97;	// Note off
+		mByte |= 0x01;
+	}
 	virtual ~SoundEventNoteRelease() {}
-
-	virtual void Write(void)
-	{
-		writeByte(0x80);	// Empty for now...
-	}
 };
 
-class SoundEventNoteVolume : public SoundEvent
-{
-public:
-	SoundEventNoteVolume(int volume) : mVolume(volume) {}
-	virtual ~SoundEventNoteVolume() {}
-
-	virtual void Write(void)
-	{
-		writeByte(0x84);
-		writeByte(mVolume);
-	}
-
-	int mVolume;
-};
 
 // Why static and not inside the multipcm_device class? Well this attempts to merge all instances of multipcm_device into one output
 static int sInstanceChannelOffset = 0;
@@ -226,6 +238,32 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 				slot.m_octave = slot.m_regs[3] >> 4;
 				slot.m_pitch = ((slot.m_regs[3] & 0xf) << 6) | (slot.m_regs[2] >> 2);
 				update_step(slot);
+
+				if (m_cur_slot >= 0 && slot.m_playing)
+				{
+					double theTime = m_stream->sample_time().as_double();
+
+					theTime = theTime - sFirstEventDelta;
+					//			int theRowIndex = (int)(theTime * 100.0f);	// 250 BPM
+					int theRowIndex = (int)(theTime * 50.0f);	// 125 BPM
+
+					sMusicRows.resize(theRowIndex + 1);
+					std::vector< SoundEvent* >& theRow = sMusicRows[theRowIndex];
+					theRow.resize(sInstanceChannelOffset);	// Ensures we have enough channels
+
+					int theChannel = mChannelOffset + m_cur_slot;
+					if (theChannel < theRow.size())
+					{
+						SoundEvent* event = theRow[theChannel];
+						if (!event)
+						{
+							event = new SoundEvent();
+							theRow[theChannel] = event;
+						}
+						event->SetNote(slot.m_pitchForStep);
+						sAnyNotesinChannel[theChannel] = true;
+					}
+				}
 			}
 			break;
 		case 4: // KeyOn/Off
@@ -255,7 +293,6 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 
 				if (m_cur_slot >= 0)
 				{
-
 					PotentialSample potentialSample(mSampleAddressOffset + slot.m_sample.m_start, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_loop, mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end);
 					auto retInsert = sPotentialSampleToIndex.insert(std::pair< PotentialSample, int>(potentialSample, (int)sPotentialSampleToIndex.size()));
 					slot.mXMSampleIndex = retInsert.first->second;
@@ -263,8 +300,13 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 					int theChannel = mChannelOffset + m_cur_slot;
 					if (theChannel < theRow.size())
 					{
-						SoundEventNoteOn* event = new SoundEventNoteOn(slot.mXMSampleIndex, (double)/*slot.m_step*/ slot.m_pitchForStep , (0x40 * (0x7f - slot.m_dest_total_level)) / 0x7f);
-						theRow[theChannel] = event;
+						SoundEvent* event = theRow[theChannel];
+						if (!event)
+						{
+							event = new SoundEvent();
+							theRow[theChannel] = event;
+						}
+						event->SetSampleIndex(slot.mXMSampleIndex).SetNote(slot.m_pitchForStep).SetVolume(slot.m_dest_total_level);
 						sAnyNotesinChannel[theChannel] = true;
 					}
 				}
@@ -340,8 +382,13 @@ void multipcm_device::write_slot(slot_t &slot, int32_t reg, uint8_t data)
 				int theChannel = mChannelOffset + m_cur_slot;
 				if (theChannel < theRow.size())
 				{
-					SoundEventNoteVolume* event = new SoundEventNoteVolume((0x40 * (0x7f - slot.m_dest_total_level)) / 0x7f);
-					theRow[theChannel] = event;
+					SoundEvent* event = theRow[theChannel];
+					if (!event)
+					{
+						event = new SoundEvent();
+						theRow[theChannel] = event;
+					}
+					event->SetVolume(slot.m_dest_total_level);
 				}
 			}
 			break;
