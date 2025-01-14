@@ -1171,6 +1171,7 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 		savedIndex = (savedIndex << 16) | justPalette;
 		// Incorporate the palette entry colours, so if the palette is changed in RAM then this has a chance of saving a new image
 		// This handles the "Thunder Blade" logo palette being updated after it is displayed for a frame at game boot.
+#if 0
 		for (int i = 0; i < 16; i++)
 		{
 			savedIndex = (savedIndex << 1) | (savedIndex >> 63);
@@ -1180,7 +1181,7 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 			}
 			savedIndex = savedIndex << 1;
 		}
-
+#endif
 		const int transparent = 0xff00ff;
 
 		if (theActualPalette && alreadySaved.insert(savedIndex).second)
