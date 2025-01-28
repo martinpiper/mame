@@ -1055,7 +1055,31 @@ sega_xboard_sprite_device::sega_xboard_sprite_device(const machine_config &mconf
 
 static std::set<uint64_t> alreadySaved;
 static FILE* fp = 0;
+static FILE* fpPalette = 0;
 static int savedRows = 0;
+static int savedImageIndex = 0;
+
+static rgb_t CheckPaleteAndForceColour(int justPalette , int pixel , rgb_t colour)
+{
+	// For After Burner force palette colours in specific palettes to return consistent "mask" colour
+	// This stops the pulsating aircraft engine exhaust colours from being saved into each sprite frame and makes it easier to spot duplicate frames later on.
+	if (justPalette == 0xf20)
+	{
+		if (pixel == 1)
+		{
+			return rgb_t(100, 0, 100);
+		}
+		else if (pixel == 2)
+		{
+			return rgb_t(150, 0, 150);
+		}
+		else if (pixel == 4)
+		{
+			return rgb_t(200, 0, 200);
+		}
+	}
+	return colour;
+}
 
 void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
@@ -1171,15 +1195,16 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 		savedIndex = (savedIndex << 16) | justPalette;
 		// Incorporate the palette entry colours, so if the palette is changed in RAM then this has a chance of saving a new image
 		// This handles the "Thunder Blade" logo palette being updated after it is displayed for a frame at game boot.
+		// After Burner seems to be coded better and does not seem to use unitialised palettes...
 #if 0
 		for (int i = 0; i < 16; i++)
 		{
 			savedIndex = (savedIndex << 1) | (savedIndex >> 63);
 			if (theActualPalette)
 			{
-				savedIndex ^= theActualPalette->pen_color(justPalette + i);
+				savedIndex ^= CheckPaleteAndForceColour(justPalette , i , theActualPalette->pen_color(justPalette + i));
 			}
-			savedIndex = savedIndex << 1;
+//			savedIndex = savedIndex << 1;
 		}
 #endif
 		const int transparent = 0xff00ff;
@@ -1192,6 +1217,24 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 				// To convert this to images, use imagemagick like this: convert.exe -verbose -size "512x256" -depth 8 rgb:c:\temp\t.raw "C:\temp\thunderblade arcade\t.png"
 				fp = fopen("c:\\temp\\t.raw", "wb");
 			}
+			if (!fpPalette)
+			{
+				// This contains palette debug information. This shows the palette index, the sprite index it was used in, and the RGB values.
+				// This is useful to spot modified palette entries for apecific palettes and to force them to return specific "mask" colours instead.
+				// See CheckPaleteAndForceColour()
+				fpPalette = fopen("c:\\temp\\t.pal", "w");
+			}
+
+			fprintf(fpPalette , "p%08x :s%08d ", justPalette, savedImageIndex);
+			savedImageIndex++;
+			for (int i = 0; i < 16; i++)
+			{
+				// This writes the real RGB colour values, not the forced colour values. So the original colours can be extracted if needed.
+				uint32_t rgb = theActualPalette->pen_color(justPalette + i);
+				fprintf(fpPalette, " %06x", rgb & 0xffffff);
+			}
+			fprintf(fpPalette, "\n");
+
 
 			uint16_t workingRowAddr = addr;
 			int rowsWritten = 0;
@@ -1230,7 +1273,7 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 
 						if (pix != 0 && pix != 15)
 						{
-							rgb_t rgb = theActualPalette->pen_color(paletteEntry);
+							rgb_t rgb = CheckPaleteAndForceColour(justPalette , pix, theActualPalette->pen_color(paletteEntry));
 							uint8_t component;
 							component = rgb.r();
 							fwrite(&component, 1, 1, fp);
