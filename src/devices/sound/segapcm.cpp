@@ -150,6 +150,11 @@ void segapcm_device::sound_stream_update(sound_stream &stream, std::vector<read_
 void segapcm_device::write(offs_t offset, uint8_t data)
 {
 	m_stream->update();
+	printf("%04x = %02x   with mask %02x\n", offset, data , offset & 0x87);
+	if ((offset & 0x87) == 0x86 && !(data & 0x01))
+	{
+		data = data;
+	}
 	m_ram[offset & 0x07ff] = data;
 }
 

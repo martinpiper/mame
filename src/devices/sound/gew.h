@@ -6,6 +6,7 @@
 #pragma once
 
 #include "dirom.h"
+#include "SaveXM.h"
 
 #define MULTIPCM_LOG_SAMPLES    0
 
@@ -15,19 +16,14 @@
 
 class gew_pcm_device : public device_t,
 						public device_sound_interface,
-						public device_rom_interface<22, 0, 0, ENDIANNESS_BIG>
+						public device_rom_interface<22, 0, 0, ENDIANNESS_BIG>,
+						public SaveXM
+
 {
 public:
 	static constexpr feature_type imperfect_features() { return feature::SOUND; }
 
-	size_t mSampleAddressOffset = 0;
-
-	u8 getSampleFromAddress(u32 address);
-	bool getSampleUsedFromAddress(u32 address);
-	size_t getSamplesSize(void);
-
 protected:
-	bool saveSamples = true;
 	gew_pcm_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock,
 		uint32_t voices, uint32_t clock_divider);
 

@@ -510,7 +510,7 @@ multipcm_device::~multipcm_device()
 	{
 		if (getSampleUsedFromAddress(i))
 		{
-			s8 sampleByte = (s8)getSampleFromAddress(i);
+			s8 sampleByte = getSampleFromAddress(i);
 			fputc(sampleByte , fp);
 		}
 	}
@@ -670,7 +670,7 @@ multipcm_device::~multipcm_device()
 				int oldSample = 0;
 				for (u32 i = sampleIterator->first.mStart; i < sampleIterator->first.mEnd; i++)
 				{
-					s8 sampleByte = (s8)getSampleFromAddress(i);
+					s8 sampleByte = getSampleFromAddress(i);
 					writeByte(sampleByte - oldSample);
 					oldSample = sampleByte;
 				}

@@ -35,32 +35,6 @@ const double gew_pcm_device::BASE_TIMES[64] = {
 constexpr uint32_t gew_pcm_device::TL_SHIFT;
 constexpr uint32_t gew_pcm_device::EG_SHIFT;
 
-static std::vector<u8> sSamples;
-static std::vector<bool> sSamplesUsed;
-
-
-u8 gew_pcm_device::getSampleFromAddress(u32 address)
-{
-	if (address >= sSamples.size())
-	{
-		return 0;
-	}
-	return sSamples[address];
-}
-bool gew_pcm_device::getSampleUsedFromAddress(u32 address)
-{
-	if (address >= sSamples.size())
-	{
-		return 0;
-	}
-	return sSamplesUsed[address];
-}
-
-size_t gew_pcm_device::getSamplesSize(void)
-{
-	return sSamplesUsed.size();
-}
-
 void gew_pcm_device::retrigger_sample(slot_t &slot)
 {
 	slot.m_offset = 0;
@@ -374,12 +348,11 @@ void gew_pcm_device::device_start()
 	{
 		saveSamples = false;
 
-		mSampleAddressOffset = sSamples.size();
+		mSampleAddressOffset = getSamplesSize();
 
 		const address_space_config* memConfig = memory_space_config().front().second;
 		int currentRange = 1 << memConfig->addr_width();
-		sSamples.resize(sSamples.size() + currentRange, 0);
-		sSamplesUsed.resize(sSamplesUsed.size() + currentRange, false);
+		sampleDataResize(getSamplesSize() + currentRange);
 	}
 
 	m_rate = (float)clock() / m_clock_divider;
@@ -626,13 +599,12 @@ void gew_pcm_device::sound_stream_update(sound_stream &stream, std::vector<read_
 					csample = (int16_t)(read_byte(slot.m_sample.m_start + spos) << 8);
 				}
 
-				if (!sSamplesUsed[mSampleAddressOffset + slot.m_sample.m_start])
+				if (!getSampleUsedFromAddress(mSampleAddressOffset + slot.m_sample.m_start))
 				{
 					for (u32 i = 0; i < slot.m_sample.m_end; i++)
 					{
 						u8 theSample = read_byte(slot.m_sample.m_start + i);
-						sSamples[mSampleAddressOffset + slot.m_sample.m_start + i] = theSample;
-						sSamplesUsed[mSampleAddressOffset + slot.m_sample.m_start + i] = true;
+						setSignedSampleForAddress(mSampleAddressOffset + slot.m_sample.m_start + i , theSample);
 					}
 				}
 
