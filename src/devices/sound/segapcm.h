@@ -10,6 +10,7 @@
 #pragma once
 
 #include "dirom.h"
+#include "SaveXM.h"
 
 //**************************************************************************
 //  TYPE DEFINITIONS
@@ -17,7 +18,8 @@
 
 class segapcm_device : public device_t,
 					   public device_sound_interface,
-					   public device_rom_interface<21>
+					   public device_rom_interface<21>,
+					   public SaveXM
 {
 public:
 	static constexpr int BANK_256    = 11;
@@ -28,6 +30,7 @@ public:
 	static constexpr int BANK_MASKF8 = 0xf8 << 16;
 
 	segapcm_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
+	virtual ~segapcm_device();
 
 	// configuration
 	void set_bank(int bank) { m_bankshift = (bank & 0xf); m_bankmask = (0x70|((bank >> 16) & 0xfc)); }
@@ -49,9 +52,16 @@ protected:
 private:
 	std::unique_ptr<uint8_t[]> m_ram;
 	uint8_t m_low[16];
+	bool mPreviousEnable[16];
+	uint8_t mPreviousReg7[16];
+	uint8_t mPreviousReg2[16];
+	uint8_t mPreviousReg3[16];
 	int m_bankshift;
 	int m_bankmask;
 	sound_stream* m_stream;
+
+	bool mInstanceInit = false;
+	int mChannelOffset = 0;
 };
 
 DECLARE_DEVICE_TYPE(SEGAPCM, segapcm_device)

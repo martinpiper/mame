@@ -599,11 +599,11 @@ void gew_pcm_device::sound_stream_update(sound_stream &stream, std::vector<read_
 					csample = (int16_t)(read_byte(slot.m_sample.m_start + spos) << 8);
 				}
 
-				if (!getSampleUsedFromAddress(mSampleAddressOffset + slot.m_sample.m_start))
+				if (!getSampleUsedFromAddress(mSampleAddressOffset + slot.m_sample.m_start) || !getSampleUsedFromAddress(mSampleAddressOffset + slot.m_sample.m_start + slot.m_sample.m_end - 1))
 				{
 					for (u32 i = 0; i < slot.m_sample.m_end; i++)
 					{
-						u8 theSample = read_byte(slot.m_sample.m_start + i);
+						s8 theSample = read_byte(slot.m_sample.m_start + i);
 						setSignedSampleForAddress(mSampleAddressOffset + slot.m_sample.m_start + i , theSample);
 					}
 				}

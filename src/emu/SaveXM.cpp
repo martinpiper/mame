@@ -33,7 +33,7 @@ bool SaveXM::getSampleUsedFromAddress(u32 address)
 {
 	if (address >= sSamples.size())
 	{
-		return 0;
+		return true;
 	}
 	return sSamplesUsed[address];
 }
@@ -45,8 +45,11 @@ size_t SaveXM::getSamplesSize(void)
 
 void SaveXM::setSignedSampleForAddress(u32 address, s8 sample)
 {
-	sSamples[address] = sample;
-	sSamplesUsed[address] = true;
+	if (address < sSamples.size())
+	{
+		sSamples[address] = sample;
+		sSamplesUsed[address] = true;
+	}
 }
 
 class PotentialSample

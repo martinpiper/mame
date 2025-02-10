@@ -28,6 +28,11 @@ segapcm_device::segapcm_device(const machine_config &mconfig, const char *tag, d
 {
 }
 
+segapcm_device::~segapcm_device()
+{
+	writeXMFile();
+}
+
 
 //-------------------------------------------------
 //  device_start - device-specific startup
@@ -38,11 +43,25 @@ void segapcm_device::device_start()
 	m_ram = std::make_unique<uint8_t[]>(0x800);
 
 	std::fill(&m_ram[0], &m_ram[0x800], 0xff);
+	std::fill(&mPreviousEnable[0], &mPreviousEnable[16], false);
+
 
 	m_stream = stream_alloc(0, 2, clock() / 128);
 
 	save_item(NAME(m_low));
 	save_pointer(NAME(m_ram), 0x800);
+
+	if (saveSamples)
+	{
+		saveSamples = false;
+
+		mSampleAddressOffset = getSamplesSize();
+
+		const address_space_config* memConfig = memory_space_config().front().second;
+		int currentRange = 1 << memConfig->addr_width();
+		sampleDataResize(getSamplesSize() + currentRange);
+	}
+
 }
 
 
@@ -99,6 +118,8 @@ void segapcm_device::sound_stream_update(sound_stream &stream, std::vector<read_
 	//          other bits: bank
 	// 0x87     ?
 
+	double theTime = m_stream->sample_time().as_double();
+
 	/* loop over channels */
 	for (int ch = 0; ch < 16; ch++)
 	{
@@ -113,6 +134,71 @@ void segapcm_device::sound_stream_update(sound_stream &stream, std::vector<read_
 			uint8_t end = regs[6] + 1;
 			int i;
 
+			// Trigger new sample?
+			if (!mPreviousEnable[ch])
+			{
+				if (regs[7] != 0)
+				{
+					u32 realEnd = (u32(end) << 8);
+					if (realEnd > 0)
+					{
+						if (!getSampleUsedFromAddress(mSampleAddressOffset + offset + (addr >> 8)) || !getSampleUsedFromAddress(mSampleAddressOffset + offset + realEnd - 1))
+						{
+							for (u32 i = 0; i < (realEnd - (addr >> 8)); i++)
+							{
+								u32 finalAddress = (offset + (addr >> 8) + i) & 0xffffff;
+								s8 theSample = read_byte(finalAddress) - 0x80;
+								setSignedSampleForAddress(mSampleAddressOffset + finalAddress, theSample);
+							}
+						}
+
+						double sampleRate = double(outputs[0].sample_rate());
+						double pitch = (sampleRate * regs[7]) / 256.0f;
+						if (regs[0x86] & 2)
+						{
+							// Loop disable
+							setNoteOn(theTime, ch, mSampleAddressOffset + offset + (addr >> 8), mSampleAddressOffset + offset + realEnd, mSampleAddressOffset + offset + realEnd, mSampleAddressOffset + offset + realEnd, pitch, std::max(regs[2], regs[3]), 0);
+						}
+						else
+						{
+							setNoteOn(theTime, ch, mSampleAddressOffset + offset + (addr >> 8), mSampleAddressOffset + offset + realEnd, mSampleAddressOffset + offset + loop, mSampleAddressOffset + offset + realEnd, pitch, std::max(regs[2], regs[3]), 0);
+						}
+
+						mPreviousEnable[ch] = true;
+
+						mPreviousReg2[ch] = regs[2];
+						mPreviousReg3[ch] = regs[3];
+						mPreviousReg7[ch] = regs[7];
+					}
+				}
+			}
+
+			if (regs[7] != 0 && mPreviousEnable[ch] && mPreviousReg7[ch] != regs[7])
+			{
+				double sampleRate = double(outputs[0].sample_rate());
+				double pitch = (sampleRate * regs[7]) / 256.0f;
+				setPitch(theTime, ch, pitch);
+
+				mPreviousReg7[ch] = regs[7];
+			}
+
+			if (regs[7] != 0 && mPreviousEnable[ch] && (mPreviousReg2[ch] != regs[2] || mPreviousReg3[ch] != regs[3]))
+			{
+				setVolume(theTime, ch, std::max(regs[2], regs[3]));
+
+				if (std::max(regs[2], regs[3]) == 0)
+				{
+					if (mPreviousEnable[ch])
+					{
+						setNoteOff(theTime, ch);
+					}
+					mPreviousEnable[ch] = false;
+				}
+
+				mPreviousReg2[ch] = regs[2];
+				mPreviousReg3[ch] = regs[3];
+			}
+
 			/* loop over samples on this channel */
 			for (i = 0; i < outputs[0].samples(); i++)
 			{
@@ -124,6 +210,13 @@ void segapcm_device::sound_stream_update(sound_stream &stream, std::vector<read_
 					if (regs[0x86] & 2)
 					{
 						regs[0x86] |= 1;
+
+						if (mPreviousEnable[ch])
+						{
+							setNoteOff(theTime, ch);
+						}
+						mPreviousEnable[ch] = false;
+
 						break;
 					}
 					else addr = loop;
@@ -143,18 +236,36 @@ void segapcm_device::sound_stream_update(sound_stream &stream, std::vector<read_
 			regs[0x85] = addr >> 16;
 			m_low[ch] = regs[0x86] & 1 ? 0 : addr;
 		}
+		else
+		{
+			if (mPreviousEnable[ch])
+			{
+				setNoteOff(theTime, ch);
+			}
+			mPreviousEnable[ch] = false;
+		}
 	}
 }
 
+static int sInstanceChannelOffset = 0;
 
 void segapcm_device::write(offs_t offset, uint8_t data)
 {
-	m_stream->update();
-	printf("%04x = %02x   with mask %02x\n", offset, data , offset & 0x87);
-	if ((offset & 0x87) == 0x86 && !(data & 0x01))
+	if (!mInstanceInit)
 	{
-		data = data;
+		mInstanceInit = true;
+
+		mChannelOffset = sInstanceChannelOffset;
+		sInstanceChannelOffset += 16;
+		resizeAnyNotesInChannel(sInstanceChannelOffset);
 	}
+
+	m_stream->update();
+//	printf("%04x = %02x   with mask %02x\n", offset, data , offset & 0x87);
+//	if ((offset & 0x87) == 0x86 && !(data & 0x01))
+//	{
+//		data = data;
+//	}
 	m_ram[offset & 0x07ff] = data;
 }
 
