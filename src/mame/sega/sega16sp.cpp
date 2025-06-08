@@ -1190,9 +1190,13 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 			bank %= numbanks;
 		const uint32_t *spritedata = spritebase + 0x10000 * bank;
 
+		int calcHeight = (height * vzoom) >> 9;
+
 		// Calculate a value to check for the sprite being written with the address and palette
 		uint64_t savedIndex = (uint64_t)(0x10000 * bank) + addr;
 		savedIndex = (savedIndex << 16) | justPalette;
+		// Add in calcHeight
+		savedIndex ^= ((uint64_t)calcHeight) << 32;
 		// Incorporate the palette entry colours, so if the palette is changed in RAM then this has a chance of saving a new image
 		// This handles the "Thunder Blade" logo palette being updated after it is displayed for a frame at game boot.
 		// After Burner seems to be coded better and does not seem to use unitialised palettes...
@@ -1220,7 +1224,7 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 			if (!fpPalette)
 			{
 				// This contains palette debug information. This shows the palette index, the sprite index it was used in, and the RGB values.
-				// This is useful to spot modified palette entries for apecific palettes and to force them to return specific "mask" colours instead.
+				// This is useful to spot modified palette entries for specific palettes and to force them to return specific "mask" colours instead.
 				// See CheckPaleteAndForceColour()
 				fpPalette = fopen("c:\\temp\\t.pal", "w");
 			}
@@ -1238,7 +1242,6 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 
 			uint16_t workingRowAddr = addr;
 			int rowsWritten = 0;
-			int calcHeight = (height * vzoom) >> 9;
 			while (rowsWritten < calcHeight)
 			{
 				uint16_t workingAddr = workingRowAddr;
