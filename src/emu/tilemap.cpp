@@ -1531,7 +1531,7 @@ void tilemap_t::draw_debug(screen_device &screen, bitmap_rgb32 &dest, u32 scroll
 	bitmap_ind8 dummy_priority;
 
 	// draw everything
-	flags |= TILEMAP_DRAW_OPAQUE;
+//	flags |= TILEMAP_DRAW_OPAQUE;	// MPi: Debug: When wanting to save out the graphics with transparency, comment out this
 
 	configure_blit_parameters(blit, dummy_priority, dest.cliprect(), flags, 0, 0xff);
 

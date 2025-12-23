@@ -1540,7 +1540,8 @@ void gfx_viewer::update_tilemap_bitmap(int width, int height)
 	// handle the redraw
 	if (m_bitmap_dirty)
 	{
-		m_bitmap.fill(0);
+//		m_bitmap.fill(0);
+		m_bitmap.fill(0xff00ff);	// MPi: Debug: When wanting to save out the graphics with transparency, use this, not the fill(0) above
 		tilemap_t &tilemap = *m_machine.tilemap().find(m_tilemap.index());
 		screen_device *const first_screen = screen_device_enumerator(m_machine.root_device()).first();
 		if (first_screen)
