@@ -1059,6 +1059,14 @@ static FILE* fpPalette = 0;
 static int savedRows = 0;
 static int savedImageIndex = 0;
 
+#if 1
+// Use for Thunder Blade
+static rgb_t CheckPaleteAndForceColour(int justPalette, int pixel, rgb_t colour)
+{
+	return colour;
+}
+#else
+// Use for After Burner
 static rgb_t CheckPaleteAndForceColour(int justPalette , int pixel , rgb_t colour)
 {
 	// For After Burner force palette colours in specific palettes to return consistent "mask" colour
@@ -1080,6 +1088,7 @@ static rgb_t CheckPaleteAndForceColour(int justPalette , int pixel , rgb_t colou
 	}
 	return colour;
 }
+#endif
 
 void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &cliprect)
 {
@@ -1200,7 +1209,7 @@ void sega_outrun_sprite_device::draw(bitmap_ind16 &bitmap, const rectangle &clip
 		// Incorporate the palette entry colours, so if the palette is changed in RAM then this has a chance of saving a new image
 		// This handles the "Thunder Blade" logo palette being updated after it is displayed for a frame at game boot.
 		// After Burner seems to be coded better and does not seem to use unitialised palettes...
-#if 0
+#if 1
 		for (int i = 0; i < 16; i++)
 		{
 			savedIndex = (savedIndex << 1) | (savedIndex >> 63);
